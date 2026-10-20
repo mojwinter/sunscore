@@ -99,9 +99,9 @@ describe("C1: daily budget of Google calls", () => {
   });
 
   it("reads SOLAR_DAILY_MAX_* with sane defaults", () => {
-    expect(dailyLimitsFromEnv({})).toEqual({ building: 300, layers: 50 });
+    expect(dailyLimitsFromEnv({})).toEqual({ building: 300, layers: 32 });
     expect(dailyLimitsFromEnv({ SOLAR_DAILY_MAX_BUILDING: "10", SOLAR_DAILY_MAX_LAYERS: "0" })).toEqual({ building: 10, layers: 0 });
-    expect(dailyLimitsFromEnv({ SOLAR_DAILY_MAX_BUILDING: "lots", SOLAR_DAILY_MAX_LAYERS: "-1" })).toEqual({ building: 300, layers: 50 });
+    expect(dailyLimitsFromEnv({ SOLAR_DAILY_MAX_BUILDING: "lots", SOLAR_DAILY_MAX_LAYERS: "-1" })).toEqual({ building: 300, layers: 32 });
   });
 
   it("the building store stops calling Google at the cap; cached roofs still work; not negatively cached", async () => {
