@@ -12,7 +12,7 @@ GitHub ──CI on PRs (typecheck, lint, test, build w/ synthetic fixtures; E2E 
    │                              → SSH deploy@VPS (host key pinned) → ff ~/solmap to the commit
    │                              → compose pull + up -d solmap on sha-<7> (skipped if .env pins SOLMAP_TAG)
    ▼
-Shared VPS 2.24.120.101 (Hostinger, Ubuntu 24.04, ~8 GB RAM): also runs puckbank and yardstick
+Shared VPS 2.25.245.15 (Hostinger, Ubuntu 24.04, ~8 GB RAM): also runs puckbank and yardstick
    ~/solmap/                    git checkout of this repo (box-wide GitHub key, like yardstick)
    ~/solmap-ops → ~/solmap/ops  symlink; the deploy job cds here
       docker-compose.yml        (tracked)   the one `solmap` service, joined to puckbank's network
@@ -28,6 +28,9 @@ Cloudflare (proxied, Full Strict, Access) → puckbank's Caddy :443 ─┬─ pu
 
 - **Caddy belongs to puckbank** (`apps/ops/` in mojwinter/puckbank). It owns ports 80/443 for the whole
   box. Solmap publishes no ports; its hostname is a block in puckbank's Caddyfile.
+- **Only Cloudflare reaches 80/443.** `/usr/local/sbin/cf-origin-firewall` on the box (run at boot by
+  `cf-origin-firewall.service`, refreshed weekly from cloudflare.com/ips) drops web traffic from anywhere
+  else, in Docker's `DOCKER-USER` chain (ufw can't see Docker's published ports). SSH is untouched.
 - **One service, no staging.** Until demo day the site sits behind **Cloudflare Access** (team emails), which
   also keeps strangers from spending our Solar quota. Open it for the demo.
 - **CI builds, the box only pulls.** The box's ~8 GB is shared with two other apps (≈2 GB in use), and a Next build peaks at 2–3 GB.
@@ -38,7 +41,7 @@ Cloudflare (proxied, Full Strict, Access) → puckbank's Caddy :443 ─┬─ pu
 Already on the box from puckbank/yardstick: Docker, the `deploy` user (in the `docker` group; `sudo` needs a
 password), the puckbank stack (Caddy and the `puckbank_puckbank` network), and `~/.ssh/config` routing
 `github.com` through `~/.ssh/gha_deploy`, which can already read mojwinter/solmap. Work as `deploy`
-(from a laptop: `ssh deploy@2.24.120.101` with your key in `~deploy/.ssh/authorized_keys`).
+(from a laptop: `ssh deploy@2.25.245.15` with your key in `~deploy/.ssh/authorized_keys`).
 
 **1. Checkout, symlink, cache dir, env**
 
@@ -87,11 +90,11 @@ tailscale sidecar. The recreate drops connections for every site on the box for 
 
 **3. Cloudflare (sunscore.tech zone)**
 - SSL/TLS: **Full (Strict)**, like the other zones on the box.
-- DNS: `@` and `www` → A records to the VPS IP, **DNS only (gray cloud)** until
-  `docker compose logs caddy | grep -i sunscore` shows a certificate was obtained for each, then **Proxied
-  (orange)**. Keep them proxied: the rate limiter trusts `CF-Connecting-IP`, which only Cloudflare can vouch for.
-  While a record is gray the edge doesn't enforce Access, but the origin check (`proxy.ts`) still 403s anyone
-  without an Access token, so keep that window short rather than worrying about it.
+- DNS: `@` and `www` → A records to the VPS IP, **Proxied (orange)** from the start. Keep them proxied: the
+  rate limiter trusts `CF-Connecting-IP`, which only Cloudflare can vouch for, and the origin firewall drops
+  anything that doesn't come through Cloudflare, so a gray-cloud record simply times out. Caddy still gets
+  its certificate through the proxy (HTTP-01 on port 80); check with
+  `docker compose logs caddy | grep -i sunscore`.
 - The old `solmap` record in the yardstick.football zone stays (proxied) for the redirect above.
 - Zero Trust → Access → Applications → Self-hosted: one app covering `sunscore.tech`, `www.sunscore.tech` and
   `solmap.yardstick.football`. Keep it **one** app: the origin accepts tokens for a single `CF_ACCESS_AUD`, and
@@ -113,23 +116,23 @@ gh secret set VPS_SSH_KEY < solmap_gha            # the private key from the box
 gh variable set NEXT_PUBLIC_MAPS_API_KEY --body "<browser key>"   # baked into the client at build
 gh variable set NEXT_PUBLIC_MAP_ID --body "<map id>"
 gh variable set DEPLOY_ENABLED --body true        # until this is set, the SSH step is skipped
-gh variable set VPS_HOST_FINGERPRINT --body 'SHA256:AjYFycy/LNCUJqeqdad2gEv7JV50bx70lmsqc9kO+Vc'
+gh variable set VPS_HOST_FINGERPRINT --body 'SHA256:qCgKPalPggujhe7/MH2o763obBOONr/nbK8lTHszAfo'
 ```
 
 `VPS_HOST_FINGERPRINT` pins the box's SSH host key (`appleboy/ssh-action`'s `fingerprint:` input), so the
 deploy job won't hand its root-equivalent `deploy` session to anything else answering on `VPS_HOST`. The
 deploy job fails up front if it's unset. The format is the whole `SHA256:…` string, exactly as
-`ssh-keygen -l` prints it (no `=` padding). The value above is the box's **ED25519** key, read on the box:
+`ssh-keygen -l` prints it (no `=` padding). The value above is the box's **ECDSA** key, read on the box:
 
 ```bash
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f2
+ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub | cut -d' ' -f2
 ```
 
-Watch out for which key the action sees: its Go SSH client asks for **ECDSA before ED25519**, so if the box
-also has an ECDSA host key (`ls /etc/ssh/ssh_host_*_key.pub`; Ubuntu creates one by default), the server
-presents that one and the deploy fails with `ssh: host key fingerprint mismatch`. In that case set the
-variable to `ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub | cut -d' ' -f2` instead. Either way, a wrong
-value fails closed. If the host key ever changes (rebuilt box), update the variable.
+ECDSA, not ED25519, because the action's Go SSH client asks for **ECDSA before ED25519**: when the box has
+an ECDSA host key (`ls /etc/ssh/ssh_host_*_key.pub`; Ubuntu creates one by default) the server presents that
+one, and an ED25519 fingerprint fails with `ssh: host key fingerprint mismatch`. Only on a box without an
+ECDSA key use `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f2`. Either way, a wrong value
+fails closed. If the host key ever changes (rebuilt or moved box), update the variable.
 
 **5. First deploy and the image.** Run Actions → Deploy → Run workflow (or merge anything to main). The
 first push creates the `ghcr.io/mojwinter/solmap` package as **private**, so the box's pull fails until you
@@ -187,7 +190,7 @@ Exact commands, in the order you'll need them. Every step ends with how to check
 says otherwise, run it on the box as `deploy`:
 
 ```bash
-ssh deploy@2.24.120.101
+ssh deploy@2.25.245.15
 cd ~/solmap-ops
 ```
 
@@ -315,7 +318,7 @@ Then warm with **one** of:
 
   ```bash
   pnpm solar:warm -- --file fixtures/demo-addresses.json        # add --layers once the heatmap ships
-  scp -r fixtures/solar deploy@2.24.120.101:~/warm-upload
+  scp -r fixtures/solar deploy@2.25.245.15:~/warm-upload
   ```
 
   Expect one `200   <label>: HIGH buildings/… (fetched)` line per roof (`already cached` = no Google call).
