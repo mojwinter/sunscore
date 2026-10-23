@@ -9,7 +9,9 @@ import { UpstreamError } from "./client";
 
 export type Sku = "building" | "layers";
 
-export const DEFAULT_DAILY_MAX: Record<Sku, number> = { building: 300, layers: 50 };
+/** Inside Google's free monthly allowances even at the cap every day: 300 × 31 < 10,000 Building Insights,
+ * 32 × 31 < 1,000 Data Layers (PLAN.md → Google Cloud). */
+export const DEFAULT_DAILY_MAX: Record<Sku, number> = { building: 300, layers: 32 };
 
 export class DailyBudgetError extends UpstreamError {
   constructor(
