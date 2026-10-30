@@ -408,7 +408,7 @@ match Google's quotas instead of being raised past them:
 | `RATE_LIMIT_LAYERS_PER_MINUTE` | 3 | 3 (leave unset) | = the Data Layers quota. Sun maps already in memory are free. |
 | `SOLAR_CACHE_TTL_SECONDS` | 900 | **14400** | Keeps every roof and sun map someone opened in memory for 4 h instead of 15 min, so re-opens stay free and skip the layers bucket. Memory is still capped (500 roofs, 100 sun maps) and never outlives the 25-day limit. |
 | `SOLAR_DAILY_MAX_BUILDING` | 300 | **600** | Judges type their own addresses, and each new roof is one call. Our Cloud project has only per-minute Solar quotas, so this in-app cap is the only daily limit on spend. 600 is an hour at the 10/min quota and well inside the free monthly allowance (PLAN.md → Google Cloud). |
-| `SOLAR_DAILY_MAX_LAYERS` | 50 | 50 (leave unset) | The only daily limit on Data Layers (there's no Cloud per-day quota), and it's the pricier SKU. Sun maps of judges' own roofs are a nice-to-have, and at the 3/min quota 50 still covers a busy day. |
+| `SOLAR_DAILY_MAX_LAYERS` | 32 | **50** | The only daily limit on Data Layers (there's no Cloud per-day quota), and it's the pricier SKU. Sun maps of judges' own roofs are a nice-to-have, and at the 3/min quota 50 still covers a busy day. |
 
 The daily counters live in memory, so the recreate below also resets today's count to 0.
 
@@ -451,7 +451,7 @@ docker compose up -d --pull never solmap
 docker compose exec solmap sh -c 'echo "rl=$RATE_LIMIT_PER_MINUTE layers=$RATE_LIMIT_LAYERS_PER_MINUTE ttl=$SOLAR_CACHE_TTL_SECONDS daily=$SOLAR_DAILY_MAX_BUILDING/$SOLAR_DAILY_MAX_LAYERS"'
 ```
 
-Expect `rl=30 layers= ttl=900 daily=/` (empty = the built-in defaults: 3, 300 and 50). If the first `grep` above
+Expect `rl=30 layers= ttl=900 daily=/` (empty = the built-in defaults: 3, 300 and 32). If the first `grep` above
 showed other values before the event, put those back instead.
 
 ### 5. If something breaks on stage
@@ -585,7 +585,8 @@ Then:
 - dataLayers is only called when the user opens the heatmap.
 - **Spend caps** (all in memory, per process; defaults are safe, so the env vars are optional):
   - A daily budget of real Google calls per SKU, reset at UTC midnight: `SOLAR_DAILY_MAX_BUILDING` (300) and
-    `SOLAR_DAILY_MAX_LAYERS` (50). Past it, `/api/solar/*` answers 503 `{error:"UPSTREAM", message:"daily limit reached"}`
+    `SOLAR_DAILY_MAX_LAYERS` (32). Both fit Google's free monthly allowance even when maxed every day
+    (300 × 31 < 10,000; 32 × 31 < 1,000). Past it, `/api/solar/*` answers 503 `{error:"UPSTREAM", message:"daily limit reached"}`
     and logs `solar budget EXHAUSTED`. Cached roofs keep working.
   - The stricter per-IP bucket above for sun maps that miss memory: `RATE_LIMIT_LAYERS_PER_MINUTE` (3).
   - Failed lookups are remembered for 5 minutes (within ~30 m), so retries don't buy the same call again, and a
